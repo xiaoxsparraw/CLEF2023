@@ -43,7 +43,6 @@ CFG = {
     'checkpoints': [
         'chechkpoints/new_volo_d4_448.pth'
     ],
-    'prior_checkpoint':'chechkpoints/fungi_balanced_prior_leval2name.pth',
     'num_workers': 32 ,
     'device': 'cuda',
     'tta': 5
@@ -62,63 +61,6 @@ valid_known_idx = valid_df['locality'].isin(known_locality)
 valid_unknown_idx = (valid_known_idx==False)
 test_known_idx = test_df['locality'].isin(known_locality)
 test_unknown_idx = (test_known_idx==False)
-
-### priormodel
-class FCN(nn.Module):
-    def __init__(self,dim=256):
-        super().__init__()
-        self.fc1 = nn.Linear(dim,dim)
-        self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(dim,dim)
-        self.drop = nn.Dropout(0.3)
-
-    def forward(self,x):
-        o = self.relu(self.fc1(x))
-        o = self.drop(o)
-        o = self.relu(self.fc2(o))
-        return o + x
-
-class priormodel (nn.Module):
-    def __init__(self,meta_feature_dim,classes_num):
-        super().__init__()
-        self.metaBN = nn.BatchNorm1d(meta_feature_dim)
-        self.fc1 = nn.Linear(meta_feature_dim,256)
-        self.fcn1 = FCN(dim=256)
-        self.fcn2 = FCN(dim=256)
-        self.fc3 = nn.Linear(256, classes_num)
-
-    def forward(self,x):
-        x= self.metaBN(x)
-        x = F.relu(self.fc1(x))
-        x = self.fcn1(x)
-        x = self.fcn2(x)
-        x = self.fc3(x)
-
-        return x
-
-
-'''begin to extra  meta_feature  '''
-
-if CFG['prior_checkpoint'] == 'checkpoints/fungi_balanced_prior_h_m.pth':
-    code2feature = np.load('meta_features/fungi_Habitat_MetaSubstrate_code2feature.npy',allow_pickle=True).item()
-    text_elements = [ 'Habitat', 'MetaSubstrate']
-elif CFG['prior_checkpoint'] == 'checkpoints/fungi_balanced_prior_leval2name.pth':
-    code2feature = np.load('meta_features/fungi_level2Name_code2feature.npy',allow_pickle=True).item()
-    text_elements = [ 'level2Name']
-
-
-def get_text(df, index):
-    text=''
-    for element in text_elements:
-        if text =='':
-            text +=str(df[element][index])
-        else:
-            text += '.'
-            text += str(df[element][index])
-    return text
-
-'''  exrtact meta_feature end'''
-
 
 def get_img(path):
     im_bgr = cv2.imread(path)
@@ -309,48 +251,6 @@ def unique_observation_id(observation_id_lst, array, prob_threshold):
 
 
 
-def process_prior(unique_observation_id_lst, class_id_lst , softmaxscore,meta_feature_dim):
-
-    device = torch.device('cuda'if torch.cuda.is_available() else 'cpu')
-    model = priormodel(meta_feature_dim,CFG['num_classes'])
-    model = nn.DataParallel(model)
-    model.to(device)
-    checkpoint = CFG['prior_checkpoint']
-
-    model.load_state_dict(torch.load(checkpoint),strict=True)
-    model.eval()
-    threhold = 1.1
-    count = 0
-
-    with torch.no_grad():
-        for i,prop in enumerate(softmaxscore):
-            if np.max(prop)<threhold:
-                code = ''
-                for index,obid in enumerate(test_df['observationID']):
-                    if obid == unique_observation_id_lst[i]:
-                        code = get_text(test_df,index)
-                        break
-                if code in code2feature.keys():
-                    meta_feature = code2feature[code]
-                else:
-                    if CFG['prior_checkpoint'] == 'checkpoints/fungi_balanced_prior_leval2name.pth':
-                        meta_feature = code2feature['unknown']
-                    else:
-                        meta_feature = code2feature['unknown.unknown']
-
-
-                out = model(torch.tensor(meta_feature).unsqueeze(0).float().to(device))
-                prior = F.softmax(out,dim = -1).cpu().numpy()
-                prop = prop * prior
-                new_pred = np.argmax(prop)
-                if new_pred != class_id_lst[i] and class_id_lst[i]!=-1:
-                        count += 1
-                        class_id_lst[i] = new_pred
-    print('prior process count:',count)
-    return class_id_lst
-
-
-
 
 def write_csv(unique_observation_id_lst, class_id_lst ,softmxscore, file_name, file_name_with_prob = None):
 
@@ -406,15 +306,11 @@ if __name__ == '__main__':
 
 
             unique_observation_id_lst_part, class_id_lst_part ,softmxscore_part = unique_observation_id(observation_id_lst, array, threshold)
-            process_prior(unique_observation_id_lst_part, class_id_lst_part ,softmxscore_part,meta_feature_dim)
             unique_observation_id_lst.extend(unique_observation_id_lst_part)
             class_id_lst.extend(class_id_lst_part)
             softmxscore.extend(softmxscore_part)
 
-
     if CFG['handle_openset'] in ['f1', 'acc']:
         write_file_name = './inference/' +  'user_submission.csv'
-
-
 
     write_csv(unique_observation_id_lst, class_id_lst ,softmxscore,write_file_name)
