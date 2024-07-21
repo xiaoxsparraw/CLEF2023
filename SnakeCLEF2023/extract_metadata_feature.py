@@ -52,3 +52,10 @@ for key,value in zip(code_lst, pca_features):
     code2feature_dict[key] = value
 
 np.save('meta_extract_features/code2feature.npy', code2feature_dict)
+
+train_meta_features = np.stack(train_df['code'].astype(str).map(code2feature_dict).values)
+val_meta_features = np.stack(val_df['code'].astype(str).map(code2feature_dict).values)
+np.save(f'meta_extract_features/clip_ViT-L_14_336px_train.npy',train_meta_features)
+np.save(f'meta_extract_features/clip_ViT-L_14_336px_val.npy',val_meta_features)
+
+
