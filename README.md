@@ -27,7 +27,7 @@ dataset is read from the *.csv file in "./metadata" directory, which includes th
 
     python extract_metadata_feature.py
 
-1 using the following command to train your own model
+2 using the following command to train your own model
     
     python train_pyramid_meta.py
 
